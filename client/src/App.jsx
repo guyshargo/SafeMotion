@@ -5,14 +5,28 @@ export default function App() {
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
       
       {/* Header */}
-      <header className="bg-white shadow-sm py-8 px-6">
+      <header className="bg-white shadow-sm pt-6 pb-10 px-6">
         <div className="max-w-4xl mx-auto">
-          <h1 className="text-4xl font-bold text-blue-900 mb-2">
-            Good Morning, Alex
-          </h1>
-          <p className="text-xl text-slate-500">
-            Monday, February 17 • Let's get moving safely
-          </p>
+          
+          {/* Logo / Brand Name Section */}
+          <div className="flex items-center gap-3 mb-8 border-b border-slate-100 pb-4">
+            <div className="w-10 h-10 bg-blue-600 rounded-xl flex items-center justify-center shadow-md">
+              <span className="text-white font-bold text-xl">S</span>
+            </div>
+            <span className="text-2xl font-bold text-slate-800 tracking-tight">
+              SafeMotion
+            </span>
+          </div>
+
+          {/* Greeting Section */}
+          <div>
+            <h1 className="text-4xl font-bold text-blue-900 mb-2">
+              Good Morning, Alex
+            </h1>
+            <p className="text-xl text-slate-500">
+              Monday, February 17 • Let's get moving safely
+            </p>
+          </div>
         </div>
       </header>
 
@@ -34,7 +48,7 @@ export default function App() {
               </p>
             </div>
             
-            <button className="bg-white text-blue-700 hover:bg-blue-100 text-xl font-bold py-4 px-10 rounded-2xl shadow-lg transition-all w-full md:w-auto text-center whitespace-nowrap cursor-pointer">
+            <button className="bg-white text-blue-700 hover:bg-blue-50 text-xl font-bold py-4 px-10 rounded-2xl shadow-lg transition-all w-full md:w-auto text-center whitespace-nowrap cursor-pointer">
               Start Session (12 min)
             </button>
           </div>
@@ -48,7 +62,7 @@ export default function App() {
           
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
             {/* Card 1 */}
-            <div className="bg-white p-8 rounded-2xl border border-slate-200 hover:border-blue-400 hover:shadow-md transition-all cursor-pointer">
+            <div className="bg-white p-8 rounded-2xl border border-slate-200 hover:border-blue-400 hover:shadow-md transition-all cursor-pointer group">
               <h4 className="text-2xl font-bold text-slate-800 mb-3 group-hover:text-blue-600">
                 Joints & Flexibility
               </h4>
@@ -58,7 +72,7 @@ export default function App() {
             </div>
 
             {/* Card 2 */}
-            <div className="bg-white p-8 rounded-2xl border border-slate-200 hover:border-blue-400 hover:shadow-md transition-all cursor-pointer">
+            <div className="bg-white p-8 rounded-2xl border border-slate-200 hover:border-blue-400 hover:shadow-md transition-all cursor-pointer group">
               <h4 className="text-2xl font-bold text-slate-800 mb-3 group-hover:text-blue-600">
                 Chair Exercises
               </h4>
@@ -68,7 +82,7 @@ export default function App() {
             </div>
 
             {/* Card 3 */}
-            <div className="bg-white p-8 rounded-2xl border border-slate-200 hover:border-blue-400 hover:shadow-md transition-all cursor-pointer">
+            <div className="bg-white p-8 rounded-2xl border border-slate-200 hover:border-blue-400 hover:shadow-md transition-all cursor-pointer group">
               <h4 className="text-2xl font-bold text-slate-800 mb-3 group-hover:text-blue-600">
                 Safe Walking at Home
               </h4>
@@ -78,7 +92,7 @@ export default function App() {
             </div>
 
             {/* Card 4 */}
-            <div className="bg-white p-8 rounded-2xl border border-slate-200 hover:border-blue-400 hover:shadow-md transition-all cursor-pointer">
+            <div className="bg-white p-8 rounded-2xl border border-slate-200 hover:border-blue-400 hover:shadow-md transition-all cursor-pointer group">
               <h4 className="text-2xl font-bold text-slate-800 mb-3 group-hover:text-blue-600">
                 Breathing & Relaxation
               </h4>
