@@ -1,11 +1,35 @@
-const SERVICE_WS_URL = "ws://127.0.0.1:8000";
-const SERVICE_HTTP_URL = "http://127.0.0.1:8000";
+import {SocketConnection} from './SocketConnection';
+
+const SERVER_URL = "http://127.0.0.1:8000";
+const SERVER_WS_URL = "ws://127.0.0.1:8000";
 
 export const DEFAULT_SESSION_ID = "default";
 
+/** 
+ * Join a session
+ * @param {string} sessionId - The session id
+ * @param {string} id - The id of the user
+ * @returns {Promise<{success: boolean, error: string, id: string, sessionId: string, participantCount: number, participants: string[], onUserJoined: (cb: (id: string, count: number) => void) => void, onUserLeft: (cb: (id: string, count: number) => void) => void, onSignal: (cb: (data: any) => void) => void, sendSignal: (msg: any) => void, onStreamAdded: (cb: (id: string, stream: MediaStream) => void) => void, addRemoteStream: (remoteId: string, stream: MediaStream) => void, getRemoteStreams: () => {id: string, stream: MediaStream}[], close: () => void}>}
+ */
+export const joinSession = async (sessionId, id) => {
+    // Check if session id is missing
+    if (!sessionId) return { success: false, error: "Missing session id" };
+
+    try {
+        const socketConnection = new SocketConnection(`${SERVER_WS_URL}/session/ws`);
+        const response = await socketConnection.connect(sessionId, id);
+
+        return {success: true, data: response};
+    } catch (error) {
+        console.error('Error joining session:', error);
+        const message = error?.error ?? error?.message ?? String(error);
+        return { success: false, error: message };
+    }
+};
+
 export const getSessionCount = async (sessionId) => {
     try {
-        const res = await fetch(`${SERVICE_HTTP_URL}/session/count/${encodeURIComponent(sessionId)}`);
+        const res = await fetch(`${SERVER_URL}/session/count/${encodeURIComponent(sessionId)}`);
         const data = await res.json();
         return data.success ? data.count : 0;
     } catch (error) {
@@ -14,83 +38,3 @@ export const getSessionCount = async (sessionId) => {
     }
 };
 
-export const joinSession = async (sessionId, id = 0) => {
-    if (!sessionId) return { success: false, error: "Missing session id" };
-
-    const numericId = parseInt(id, 10);
-    const effectiveId = isNaN(numericId) ? 0 : numericId;
-
-    console.log(`Joining session via WebSocket: ${sessionId}, id=${effectiveId}`);
-
-    return new Promise((resolve) => {
-        let resolved = false;
-        const finish = (result) => {
-            if (resolved) return;
-            resolved = true;
-            resolve(result);
-        };
-
-        try {
-            const ws = new WebSocket(`${SERVICE_WS_URL}/session/ws/${encodeURIComponent(sessionId)}/${effectiveId}`);
-            const remoteStreams = [];
-            const userJoinedCallbacks = new Set();
-            const streamAddedCallbacks = new Set();
-
-            const userLeftCallbacks = new Set();
-            const signalCallbacks = new Set();
-            ws.onmessage = (event) => {
-                const data = JSON.parse(event.data);
-                if (data.type === "user_joined") {
-                    if (!remoteStreams.some((s) => String(s.id) === String(data.id))) {
-                        remoteStreams.push({ id: data.id, stream: null });
-                    }
-                    userJoinedCallbacks.forEach((cb) => cb(data.id, data.count));
-                } else if (data.type === "user_left") {
-                    const idx = remoteStreams.findIndex((s) => s.id === data.id);
-                    if (idx >= 0) remoteStreams.splice(idx, 1);
-                    userLeftCallbacks.forEach((cb) => cb(data.id, data.count));
-                } else if (data.type === "offer" || data.type === "answer" || data.type === "ice") {
-                    signalCallbacks.forEach((cb) => cb(data));
-                } else if (data.success) {
-                    finish({
-                        success: true,
-                        id: data.id,
-                        sessionId: data.sessionId || sessionId,
-                        participantCount: data.count ?? 1,
-                        participants: data.participants ?? [],
-                        onUserJoined: (cb) => userJoinedCallbacks.add(cb),
-                        onUserLeft: (cb) => userLeftCallbacks.add(cb),
-                        onSignal: (cb) => signalCallbacks.add(cb),
-                        sendSignal: (msg) => ws.readyState === WebSocket.OPEN && ws.send(JSON.stringify(msg)),
-                        onStreamAdded: (cb) => streamAddedCallbacks.add(cb),
-                        addRemoteStream: (remoteId, stream) => {
-                            const entry = remoteStreams.find((s) => String(s.id) === String(remoteId));
-                            if (entry) entry.stream = stream;
-                            else remoteStreams.push({ id: remoteId, stream });
-                            streamAddedCallbacks.forEach((cb) => cb(remoteId, stream));
-                        },
-                        getRemoteStreams: () => [...remoteStreams],
-                        close: () => ws.close(),
-                    });
-                } else {
-                    finish({ success: false, error: data.error || "Session not found" });
-                }
-            };
-
-            ws.onerror = (error) => {
-                console.error(`Error joining session: ${error}`);
-                ws.close();
-                finish({ success: false, error: "Connection failed. Is the server running?" });
-            };
-
-            ws.onclose = (event) => {
-                if (!resolved) {
-                    finish({ success: false, error: event.code === 4001 ? "Session not found" : "Connection closed" });
-                }
-            };
-        } catch (error) {
-            console.error(`Error joining session: ${error}`);
-            finish({ success: false, error: "Connection failed" });
-        }
-    });
-};

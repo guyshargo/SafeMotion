@@ -80,18 +80,18 @@ export const Video = ({ stream = null, poseLandmarker = null, isSkeletonShow = f
   }, [stream, poseLandmarker, isSkeletonShow]);
 
   return (
-    <div className="relative inline-block">
+    <div className="relative w-80 aspect-video bg-slate-800 rounded-lg overflow-hidden">
       <video
         ref={videoRef}
         autoPlay
         playsInline
         muted
-        className={`block w-full max-w-full h-auto ${isSkeletonShow ? 'opacity-0 pointer-events-none absolute' : ''}`}
+        className={`block w-full h-full object-cover ${isSkeletonShow ? 'opacity-0 pointer-events-none absolute inset-0' : ''}`}
       />
       {isSkeletonShow && (
         <canvas
           ref={canvasRef}
-          className="block pointer-events-none"
+          className="absolute inset-0 w-full h-full pointer-events-none"
         />
       )}
     </div>

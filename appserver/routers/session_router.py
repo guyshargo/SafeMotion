@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from PrintMessages import start_action, end_action, info_message, error_message
+import json
 
 # Define the router for the session endpoints
 router = APIRouter(prefix="/session", tags=["session"])
@@ -9,99 +10,138 @@ router = APIRouter(prefix="/session", tags=["session"])
 # Server-side session management
 # TODO: Add a database to store the sessions
 DEFAULT_SESSION_ID = "default"
-sessions = {}  # sessionId -> [id, id, ...]
-session_connections = {}  # sessionId -> { id: websocket }
-_next_user_id = 0
+sessions = {} 
+session_connections = {}  
 
+"""
+    Send a message to a socket.
+    Args:
+        socket: WebSocket - The socket to send the message to
+        message: dict - The message to send
+    Returns:
+        None
+"""
+async def _send_message(socket: WebSocket, message: dict):
+    try:
+        await socket.send_json(message)
+    except Exception:
+        pass
 
-async def _broadcast_user_joined(session_id: str, new_id: int):
-    """Notify all participants except new_id that a user joined."""
+"""
+    Args:
+        session_id: str - The session id
+        message: dict - The message to broadcast
+    new_id: str - The id of the new user
+    Returns:
+        None
+"""
+async def _broadcast_message(sender_id: str, session_id: str, message: dict):
+    # Check if session exists
     if session_id not in session_connections:
         return
-    count = len(sessions.get(session_id, []))
-    for uid, ws in list(session_connections[session_id].items()):
-        if uid != new_id:
-            try:
-                await ws.send_json({"type": "user_joined", "id": new_id, "count": count})
-            except Exception:
-                pass
+    
+    count = len(sessions[session_id])
+    message["count"] = count
 
+    # Send message to all sockets in the session
+    for id, socket in list(session_connections[session_id].items()):
+        if id == sender_id:
+            continue
+        await _send_message(socket, message)
 
-async def _broadcast_user_left(session_id: str, left_id: int):
-    """Notify all participants that a user left."""
-    if session_id not in session_connections:
-        return
-    count = len(sessions.get(session_id, []))
-    for uid, ws in list(session_connections[session_id].items()):
+"""
+    Listen for messages from the client.
+    Args:
+        websocket: WebSocket - The websocket connection
+        session_id: str - The session id
+        id: str - The id of the user
+    Returns:
+        None
+"""
+async def listen(websocket: WebSocket, session_id: str, id: str):
+    # Listen for messages from the client
+    while True:
+        message = await websocket.receive_text()
+        if not message:
+            continue
+
+        start_action("Session", "Got message", { session_id, id })
         try:
-            await ws.send_json({"type": "user_left", "id": left_id, "count": count})
-        except Exception:
+            message = json.loads(message)
+            msg_type = message.get("type")
+            to_id = message.get("to")
+
+            if msg_type in ("offer", "answer", "ice") and to_id is not None:
+                to_id_key = str(to_id)  # Keys are strings (from URL path)
+                if session_id in session_connections and to_id_key in session_connections[session_id]:
+                    message["from"] = id
+                    await _send_message(session_connections[session_id][to_id_key], message)
+        except (json.JSONDecodeError, KeyError):
             pass
+"""
+    Join session. If first to enter, creates the session.
+    Args:
+        websocket: WebSocket - The websocket connection
+        session_id: str - The session id
+        id: str - The id of the user
+    Returns:
+        dict - The response
+"""
+@router.websocket("/ws/{session_id:str}/{id:str}")
+async def session_join_websocket(websocket: WebSocket, session_id: str, id: str):
+    start_action("Session", "Join session websocket", { session_id, id })
 
-
-@router.websocket("/ws/{session_id:str}/{id:int}")
-async def session_join_websocket(websocket: WebSocket, session_id: str, id: int):
-    """Join session. If first to enter, creates the session."""
-    global _next_user_id
     await websocket.accept()
 
     # If first to enter, create session
     if session_id not in sessions:
         sessions[session_id] = []
-        session_connections[session_id] = {}
-    if session_id not in session_connections:
-        session_connections[session_id] = {}
+        session_connections[session_id] = {} 
 
-    # Assign id if 0 (first join), otherwise use provided id
-    user_id = id
-    if id == 0:
-        _next_user_id += 1
-        user_id = _next_user_id
-        sessions[session_id].append(user_id)
+    # Add id to session (avoid duplicates from same user connecting multiple times)
+    if id not in sessions[session_id]:
+        sessions[session_id].append(id)
+    session_connections[session_id][id] = websocket
 
-    if user_id not in sessions[session_id]:
-        sessions[session_id].append(user_id)
+    info_message("Session", f"Added id to session and session connections: session_id={session_id}, id={id}")
 
-    session_connections[session_id][user_id] = websocket
-    start_action("Session", "Join session", f"{session_id} id={user_id}")
-
-    await _broadcast_user_joined(session_id, user_id)
+    # Broadcast user joined to all other participants
+    message = { "type": "user_joined" , "id": id }
+    await _broadcast_message(id, session_id, message)
 
     try:
+        # Send success message to client
         await websocket.send_json({
-            "success": True,
-            "sessionId": session_id,
-            "id": user_id,
-            "count": len(sessions[session_id]),
-            "participants": list(sessions[session_id]),
+            "type":"join", 
+            "success": True, 
+            "sessionId": session_id, 
+            "participants": list(sessions[session_id])
         })
-        end_action("Session", "Join session", session_id)
-        import json
-        while True:
-            raw = await websocket.receive_text()
-            try:
-                msg = json.loads(raw)
-                msg_type = msg.get("type")
-                to_id = msg.get("to")
-                if msg_type in ("offer", "answer", "ice") and to_id is not None:
-                    if session_id in session_connections and to_id in session_connections[session_id]:
-                        msg["from"] = user_id
-                        await session_connections[session_id][to_id].send_json(msg)
-            except (json.JSONDecodeError, KeyError):
-                pass
+
+        end_action("Session", "Join session websocket", session_id)
+
+        # Listen for messages from the client
+        await listen(websocket, session_id, id)
+        
     except WebSocketDisconnect:
         pass
     finally:
+        start_action("Session", "Leave session websocket", { session_id, id })
+        # Remove id from session and session connections
         if session_id in session_connections:
-            session_connections[session_id].pop(user_id, None)
+            session_connections[session_id].pop(id, None)
             if not session_connections[session_id]:
                 del session_connections[session_id]
-        if session_id in sessions and user_id in sessions[session_id]:
-            sessions[session_id].remove(user_id)
+
+        # Remove id from session (remove all occurrences)
+        if session_id in sessions and id in sessions[session_id]:
+            sessions[session_id] = [x for x in sessions[session_id] if x != id]
             if not sessions[session_id]:
                 del sessions[session_id]
             else:
-                await _broadcast_user_left(session_id, user_id)
+                await _broadcast_message(id, session_id, { "type": "user_left", "id": id })
+
+        end_action("Session", "Leave session websocket", { session_id, id })
 
 
 @router.get("/count/{session_id:str}")
@@ -112,9 +152,9 @@ def get_session_count(session_id: str):
     return {"success": True, "count": len(sessions[session_id])}
 
 
-@router.get("/stop/{session_id:str}/{id:int}")
-def stop_session(session_id: str, id: int):
-    """Remove the given id from the session."""
+@router.get("/stop/{session_id:str}/{id:str}")
+async def stop_session(session_id: str, id: str):
+    """Remove the given id from the session and close their websocket."""
     start_action("Session", "Stop session", f"{session_id} id={id}")
 
     if session_id not in sessions:
@@ -126,6 +166,15 @@ def stop_session(session_id: str, id: int):
         ids.remove(id)
         if not ids:
             del sessions[session_id]
+        else:
+            await _broadcast_message(id, session_id, {"type": "user_left", "id": id})
+        # Close websocket if connected (triggers client disconnect)
+        if session_id in session_connections and id in session_connections[session_id]:
+            ws = session_connections[session_id].pop(id, None)
+            if not session_connections[session_id]:
+                del session_connections[session_id]
+            if ws is not None:
+                await ws.close()
         end_action("Session", "Stop session", session_id)
         return {'success': True, 'message': 'User left session'}
     else:

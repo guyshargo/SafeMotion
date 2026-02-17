@@ -1,17 +1,11 @@
 import React from 'react';
-import { joinSession, DEFAULT_SESSION_ID } from '../../services/SessionService';
-
+import { DEFAULT_SESSION_ID } from '../../services/SessionService';
+import { useNavigate } from 'react-router-dom';
 export function HomePage() {
+  const navigate = useNavigate();
 
-  const handleJoinSession = async () => {
-    const result = await joinSession(DEFAULT_SESSION_ID, 0);
-    if (result?.success) {
-      const base = window.location.pathname.replace(/\/$/, '') || '';
-      const url = `${window.location.origin}${base}/${result.sessionId}/${result.id}`;
-      window.open(url, '_blank');
-      result.close?.();
-    }
-  };
+  const ID = Math.floor(Math.random() * 1000000);
+  const SESSION_ID = DEFAULT_SESSION_ID;
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
@@ -52,7 +46,7 @@ export function HomePage() {
               </p>
             </div>
             <button
-              onClick={handleJoinSession}
+              onClick={() => navigate(`/session/${SESSION_ID}/${ID}`)}
               className="bg-white text-blue-700 hover:bg-blue-50 text-xl font-bold py-4 px-10 rounded-2xl shadow-lg transition-all w-full md:w-auto text-center whitespace-nowrap cursor-pointer">
               Join Session (12 min)
             </button>

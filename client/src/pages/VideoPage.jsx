@@ -1,5 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { Session } from '../../services/Session';
+import { joinSession } from '../../services/SessionService';
 import { Video } from '../components/Video';
 import {
   createPeerConnection,
@@ -9,66 +11,94 @@ import {
   addIceCandidate,
 } from '../../services/WebRTCService';
 
-export function VideoPage({ id, sessionId, sessionConnection }) {
+export function VideoPage() {
+  const navigate = useNavigate();
+
+  // Get sessionId and id from URL
+  const { sessionId, id } = useParams();
+
+  // Stream and pose landmarker states
   const [stream, setStream] = useState(null);
   const [poseLandmarker, setPoseLandmarker] = useState(null);
-  const [remoteStreams, setRemoteStreams] = useState([]);
-  const [participantCount, setParticipantCount] = useState(
-    sessionConnection?.participantCount ?? 1
-  );
-  const [connectedUsers, setConnectedUsers] = useState(
-    sessionConnection?.participants ?? []
-  );
-  const [error, setError] = useState(null);
   const sessionRef = useRef(null);
+
+  // Remote streams state
+  const [remoteStreams, setRemoteStreams] = useState([]);
+  const [connectedUsers, setConnectedUsers] = useState([]);
   const peerConnectionsRef = useRef(new Map());
 
+  // Connection and error state
+  const [connection, setConnection] = useState(null);
+  const [error, setError] = useState(null);
+
+  // Connect to session on mount
   useEffect(() => {
-    if (!sessionConnection) return;
-    setParticipantCount(sessionConnection.participantCount ?? 1);
-    const initialParticipants = (sessionConnection.participants ?? []).filter(
-      (uid) => String(uid) !== String(id)
-    );
-    setConnectedUsers(sessionConnection.participants ?? []);
-    setRemoteStreams((prev) => {
-      const existing = new Set(prev.map((r) => String(r.id)));
-      const added = initialParticipants.filter((uid) => !existing.has(String(uid)));
-      return [...prev, ...added.map((uid) => ({ id: uid, stream: null }))];
-    });
-    sessionConnection.onUserJoined((remoteId, count) => {
-      setRemoteStreams((prev) => {
-        if (prev.some((r) => String(r.id) === String(remoteId))) return prev;
-        return [...prev, { id: remoteId, stream: null }];
-      });
-      setConnectedUsers((prev) => (prev.some((u) => String(u) === String(remoteId)) ? prev : [...prev, remoteId]));
-      if (count != null) setParticipantCount(count);
-      else setParticipantCount((prev) => prev + 1);
-    });
-    sessionConnection.onUserLeft?.((leftId, count) => {
-      const pc = peerConnectionsRef.current.get(String(leftId));
-      if (pc) {
-        pc.close();
-        peerConnectionsRef.current.delete(String(leftId));
+    let conn = null;
+
+    const run = async () => {
+      try {
+        const res = await joinSession(sessionId, id);
+        if (!res.success) {
+          setError(res.error || 'Could not connect to session');
+          return;
+        }
+        conn = res.data;
+        setConnection(conn);
+
+        const raw = conn.userIds ?? [];
+        const userIds = [...new Set(raw.map((u) => String(u)))];
+        setConnectedUsers(userIds);
+        const seen = new Set();
+        setRemoteStreams(
+          userIds
+            .filter((uid) => {
+              if (String(uid) === String(id)) return false;
+              if (seen.has(String(uid))) return false;
+              seen.add(String(uid));
+              return true;
+            })
+            .map((uid) => ({ id: uid, stream: null }))
+        );
+
+        conn.onUserJoined((remoteId) => {
+          const key = String(remoteId);
+          if (key === String(id)) return;
+          setRemoteStreams((prev) =>
+            prev.some((r) => String(r.id) === key)
+              ? prev
+              : [...prev, { id: remoteId, stream: null }]
+          );
+          setConnectedUsers((prev) =>
+            prev.some((u) => String(u) === key) ? prev : [...prev, remoteId]
+          );
+        });
+        conn.onUserLeft?.((leftId) => {
+          peerConnectionsRef.current.get(String(leftId))?.close();
+          peerConnectionsRef.current.delete(String(leftId));
+          setRemoteStreams((prev) => prev.filter((r) => String(r.id) !== String(leftId)));
+          setConnectedUsers((prev) => prev.filter((uid) => String(uid) !== String(leftId)));
+        });
+        conn.onStreamAdded?.((remoteId, stream) => {
+          setRemoteStreams((prev) =>
+            prev.map((r) => (String(r.id) === String(remoteId) ? { ...r, stream } : r))
+          );
+        });
+      } catch (err) {
+        setError(err?.error ?? err?.message ?? 'Connection failed');
       }
-      setRemoteStreams((prev) => prev.filter((r) => String(r.id) !== String(leftId)));
-      setConnectedUsers((prev) => prev.filter((uid) => String(uid) !== String(leftId)));
-      if (count != null) setParticipantCount(count);
-      else setParticipantCount((prev) => Math.max(1, prev - 1));
-    });
-    sessionConnection.onStreamAdded?.((remoteId, stream) => {
-      setRemoteStreams((prev) =>
-        prev.map((r) => (String(r.id) === String(remoteId) ? { ...r, stream } : r))
-      );
-    });
+    };
+
+    run();
+
     return () => {
       peerConnectionsRef.current.forEach((pc) => pc.close());
       peerConnectionsRef.current.clear();
-      sessionConnection?.close?.();
+      conn?.close?.();
     };
-  }, [sessionConnection, id]);
+  }, [sessionId, id]);
 
   useEffect(() => {
-    if (!sessionConnection || !stream) return;
+    if (!connection || !stream) return;
     const myId = parseInt(id, 10) || 0;
     const ensurePeer = (remoteId) => {
       const key = String(remoteId);
@@ -76,24 +106,26 @@ export function VideoPage({ id, sessionId, sessionConnection }) {
       const pc = createPeerConnection(
         remoteId,
         stream,
-        (rid, s) => sessionConnection.addRemoteStream(rid, s),
+        (rid, s) => connection.addRemoteStream(rid, s),
         (rid, candidate) =>
-          sessionConnection.sendSignal({
+          connection.sendSignal({
             type: 'ice',
-            to: parseInt(rid, 10) || rid,
+            to: rid,
             candidate: candidate?.toJSON ? candidate.toJSON() : candidate,
           })
       );
       peerConnectionsRef.current.set(key, pc);
       const otherId = parseInt(remoteId, 10) || 0;
       if (myId > otherId) {
-        createOffer(pc).then((offer) =>
-          sessionConnection.sendSignal({
-            type: 'offer',
-            to: Number(remoteId) || remoteId,
-            offer,
-          })
-        );
+        createOffer(pc)
+          .then((offer) =>
+            connection.sendSignal({
+              type: 'offer',
+              to: remoteId,
+              offer,
+            })
+          )
+          .catch((err) => console.error('Create offer failed:', err));
       }
     };
     const handleSignal = async (data) => {
@@ -104,26 +136,33 @@ export function VideoPage({ id, sessionId, sessionConnection }) {
         pc = peerConnectionsRef.current.get(target);
       }
       if (!pc) return;
-      if (data.type === 'offer') {
-        await createAnswer(pc, data.offer);
-        sessionConnection.sendSignal({
-          type: 'answer',
-          to: parseInt(data.from, 10) ?? data.from,
-          answer: pc.localDescription,
-        });
-      } else if (data.type === 'answer') {
-        await handleAnswer(pc, data.answer);
-      } else if (data.type === 'ice' && data.candidate) {
-        await addIceCandidate(pc, data.candidate);
+      try {
+        if (data.type === 'offer') {
+          await createAnswer(pc, data.offer);
+          connection.sendSignal({
+            type: 'answer',
+            to: data.from,
+            answer: pc.localDescription,
+          });
+        } else if (data.type === 'answer') {
+          await handleAnswer(pc, data.answer);
+        } else if (data.type === 'ice' && data.candidate) {
+          await addIceCandidate(pc, data.candidate);
+        }
+      } catch (err) {
+        console.error('Signal handling failed:', err);
       }
     };
-    sessionConnection.onSignal(handleSignal);
-    (sessionConnection.participants ?? []).forEach((uid) => {
+    const unsubSignal = connection.onSignal(handleSignal);
+    const unsubJoined = connection.onUserJoined((remoteId) => ensurePeer(remoteId));
+    (connection.userIds ?? []).forEach((uid) => {
       if (String(uid) !== String(id)) ensurePeer(uid);
     });
-    const onJoined = (remoteId) => ensurePeer(remoteId);
-    sessionConnection.onUserJoined(onJoined);
-  }, [sessionConnection, stream, id]);
+    return () => {
+      unsubSignal?.();
+      unsubJoined?.();
+    };
+  }, [connection, stream, id]);
 
   useEffect(() => {
     if (!sessionId) {
@@ -153,14 +192,24 @@ export function VideoPage({ id, sessionId, sessionConnection }) {
     if (!window.closed) window.location.href = '/';
   };
 
+  // Early-render UI
   if (error) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-900 text-white">
         <p>{error}</p>
+        <button onClick={() => navigate('/')} className="mt-4 text-blue-400 underline">
+          Back to home
+        </button>
       </div>
     );
   }
-
+  if (!connection) {
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-slate-900 text-white">
+        <p>Connecting to session...</p>
+      </div>
+    );
+  }
   if (!stream) {
     return (
       <div className="min-h-screen flex items-center justify-center bg-slate-900 text-white">
@@ -169,30 +218,34 @@ export function VideoPage({ id, sessionId, sessionConnection }) {
     );
   }
 
+  const uniqueUsers = [...new Set(connectedUsers.map((u) => String(u)))];
+  const remoteList = remoteStreams.filter((r, i, arr) => arr.findIndex((x) => String(x.id) === String(r.id)) === i);
+
+  const userIdsTitle = uniqueUsers
+    .map((uid) => (String(uid) === String(id) ? `You (${uid})` : uid))
+    .join(', ');
+
   return (
     <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6">
       <p className="text-white/90 text-lg font-semibold mb-2">
-        {participantCount} {participantCount === 1 ? 'person' : 'people'} in session
-      </p>
-      <p className="text-white/70 text-sm mb-4">
-        Connected: {connectedUsers.map((uid) => (String(uid) === String(id) ? `You (${uid})` : `User ${uid}`)).join(', ')}
+        Users in session: {userIdsTitle}
       </p>
       <div className="flex flex-wrap justify-center gap-6">
         <div className="flex flex-col items-center">
-          <span className="text-white/80 text-sm mb-2">Webcam + Skeleton</span>
-          <Video stream={stream} poseLandmarker={poseLandmarker} isSkeletonShow={false} />
+          <span className="text-white/80 text-sm mb-2">You (video)</span>
+          <Video stream={stream} poseLandmarker={null} isSkeletonShow={false} />
         </div>
         <div className="flex flex-col items-center">
-          <span className="text-white/80 text-sm mb-2">Skeleton only</span>
+          <span className="text-white/80 text-sm mb-2">You (skeleton)</span>
           <Video stream={stream} poseLandmarker={poseLandmarker} isSkeletonShow />
         </div>
-        {remoteStreams.map(({ id: remoteId, stream: remoteStream }) => (
+        {remoteList.map(({ id: remoteId, stream: remoteStream }) => (
           <div key={remoteId} className="flex flex-col items-center">
             <span className="text-white/80 text-sm mb-2">User {remoteId}</span>
             {remoteStream ? (
               <Video stream={remoteStream} poseLandmarker={null} isSkeletonShow={false} />
             ) : (
-              <div className="w-64 h-48 bg-slate-800 rounded-lg flex items-center justify-center text-slate-400">
+              <div className="w-80 aspect-video bg-slate-800 rounded-lg flex items-center justify-center text-slate-400">
                 Connecting...
               </div>
             )}
