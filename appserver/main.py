@@ -2,7 +2,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 import uvicorn
 
-from service.user_router import router as user_router
+from routers.user_router import router as user_router
+from routers.session_router import router as session_router
 
 # FastAPI app instance
 app = FastAPI(
@@ -34,10 +35,12 @@ def health():
 
 # Include user routes 
 app.include_router(user_router)
-
+app.include_router(session_router)
 
 if __name__ == "__main__":
-    print("\n- - - SafeMotion Server API is running - - -\n")
+    print("\n- - - SafeMotion Server API is running - - -")
+
+    print()
 
     uvicorn.run(
         "main:app",
