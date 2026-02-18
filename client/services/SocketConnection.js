@@ -13,6 +13,102 @@ export class SocketConnection {
         this.signalCallbacks = new Set();
     }
 
+    #handleMessage(message, sessionId, id, resolve, reject) {
+        switch (message.type) {
+            // Another user joined session
+            case "user_joined":
+                // If user is not already in remote streams, add them
+                if (!this.remoteStreams.some((stream) => stream.id === message.id)) {
+                    this.remoteStreams.push({ id: message.id, stream: null });
+                }
+
+                // Notify all users that the user joined
+                this.userJoinedCallbacks.forEach((callback) => callback(message.id, message.count));
+                break;
+
+            // Another user left session
+            case "user_left":
+                // Find index of user in remote streams
+                const idx = this.remoteStreams.findIndex((stream) => stream.id === message.id);
+                
+                // Check if user is in remote streams and remove them
+                if (idx >= 0) 
+                    this.remoteStreams.splice(idx, 1);
+
+                // Notify all users that the user left
+                this.userLeftCallbacks.forEach((callback) => callback(message.id, message.count));
+                break;
+
+            // Signal message
+            case "offer":
+            case "answer":
+            case "ice":
+                // Notify all users that a signal was received
+                this.signalCallbacks.forEach((callback) => callback(message));
+                break;
+
+            // User joined session
+            case "join":
+                // recieve : { type: "join", success: boolean, sessionId: string, participants: string[] }
+                // Check if message is successful and has a session id
+                if (!message.success || message.sessionId !== sessionId) 
+                    reject({ success: false, error: message.error || "Session not found" });
+                else {
+                    // Create response object
+                    resolve({
+                        success: true,
+                        id,
+                        sessionId,
+                        participantCount: message.participants?.length || 1,
+                        userIds: message.participants || [],
+
+                        // Callbacks
+                        // User joined Callback
+                        onUserJoined: (callback) => {
+                            this.userJoinedCallbacks.add(callback);
+                            return () => this.userJoinedCallbacks.delete(callback);
+                        },
+
+                        // User left Callback
+                        onUserLeft: (callback) => {
+                            this.userLeftCallbacks.add(callback);
+                            return () => this.userLeftCallbacks.delete(callback);
+                        },
+
+                        // Signal Callback
+                        onSignal: (callback) => {
+                            this.signalCallbacks.add(callback);
+                            return () => this.signalCallbacks.delete(callback);
+                        },
+
+                        // Stream added Callback
+                        onStreamAdded: (callback) => this.streamAddedCallbacks.add(callback),
+
+                        // Functions
+                        // Send signal function
+                        sendSignal: (msg) => this.ws.readyState === WebSocket.OPEN && this.ws.send(JSON.stringify(msg)),
+                        
+                        // Add remote stream function
+                        addRemoteStream: (remoteId, stream) => {
+                            const entry = this.remoteStreams.find((s) => String(s.id) === String(remoteId));
+                            if (entry) entry.stream = stream;
+                            else this.remoteStreams.push({ id: remoteId, stream });
+                            this.streamAddedCallbacks.forEach((callback) => callback(remoteId, stream));
+                        },
+
+                        // Get remote streams function
+                        getRemoteStreams: () => [...this.remoteStreams],
+
+                        // Close function
+                        close: () => this.ws.close(),
+                    });
+                }
+                break;
+            default:
+                reject({ success: false, error: message.error || "Session not found" });
+                break;
+        }
+    }
     connect(sessionId, id) {
         return new Promise((resolve, reject) => {
             // Join session websocket
@@ -21,69 +117,7 @@ export class SocketConnection {
             // On receiving a message
             this.ws.onmessage = (data) => {
                 const message = JSON.parse(data.data);
-
-                switch (message.type) {
-                    case "user_joined":
-                        if (!this.remoteStreams.some((s) => String(s.id) === String(message.id))) {
-                            this.remoteStreams.push({ id: message.id, stream: null });
-                        }
-                        this.userJoinedCallbacks.forEach((cb) => cb(message.id, message.count));
-                        break;
-                    case "user_left":
-                        const idx = this.remoteStreams.findIndex((s) => s.id === message.id);
-                        if (idx >= 0) this.remoteStreams.splice(idx, 1);
-                        this.userLeftCallbacks.forEach((cb) => cb(message.id, message.count));
-                        break;
-                    case "offer":
-                    case "answer":
-                    case "ice":
-                        this.signalCallbacks.forEach((cb) => cb(message));
-                        break;
-
-                    // User joined session
-                    case "join":
-                        // recieve : { type: "join", success: boolean, sessionId: string, participants: string[] }
-                        if (!message.success || message.sessionId !== sessionId) {
-                            reject({ success: false, error: message.error || "Session not found" });
-                        }
-                        else {
-                            resolve({
-                                success: true,
-                                id,
-                                sessionId: sessionId,
-                                participantCount: message.participants?.length || 1,
-                                userIds: message.participants || [],
-
-                                // Callbacks (return unsubscribe)
-                                onUserJoined: (cb) => {
-                                    this.userJoinedCallbacks.add(cb);
-                                    return () => this.userJoinedCallbacks.delete(cb);
-                                },
-                                onUserLeft: (cb) => {
-                                    this.userLeftCallbacks.add(cb);
-                                    return () => this.userLeftCallbacks.delete(cb);
-                                },
-                                onSignal: (cb) => {
-                                    this.signalCallbacks.add(cb);
-                                    return () => this.signalCallbacks.delete(cb);
-                                },
-                                sendSignal: (msg) => this.ws.readyState === WebSocket.OPEN && this.ws.send(JSON.stringify(msg)),
-                                onStreamAdded: (cb) => this.streamAddedCallbacks.add(cb),
-                                addRemoteStream: (remoteId, stream) => {
-                                    const entry = this.remoteStreams.find((s) => String(s.id) === String(remoteId));
-                                    if (entry) entry.stream = stream;
-                                    else this.remoteStreams.push({ id: remoteId, stream });
-                                    this.streamAddedCallbacks.forEach((cb) => cb(remoteId, stream));
-                                },
-                                getRemoteStreams: () => [...this.remoteStreams],
-                                close: () => this.ws.close(),
-                            });
-                        }
-                        break;
-                    default:
-                        reject({ success: false, error: message.error || "Session not found" });
-                        break;
-                }
+                this.#handleMessage(message, sessionId, id, resolve, reject);        
             };
 
             // On error
@@ -102,7 +136,6 @@ export class SocketConnection {
                 this.remoteStreams = [];
                 this.ws = null;
             };
-
         });
     };
 }

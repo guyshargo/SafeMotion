@@ -1,7 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { Session } from '../../services/Session';
-import { joinSession } from '../../services/SessionService';
+import { joinSession, stopSession, getTrainingSessionSchedule } from '../../services/SessionService';
 import { Video } from '../components/Video';
 import {
   createPeerConnection,
@@ -17,247 +17,361 @@ export function VideoPage() {
   // Get sessionId and id from URL
   const { sessionId, id } = useParams();
 
-  // Stream and pose landmarker states
-  const [stream, setStream] = useState(null);
-  const [poseLandmarker, setPoseLandmarker] = useState(null);
-  const sessionRef = useRef(null);
+  // Connection state
+  const [myConnection, setMyConnection] = useState(null);
 
-  // Remote streams state
+  // Other participants' streams state
   const [remoteStreams, setRemoteStreams] = useState([]);
-  const [connectedUsers, setConnectedUsers] = useState([]);
+
+  // Peer connections map state
   const peerConnectionsRef = useRef(new Map());
 
-  // Connection and error state
-  const [connection, setConnection] = useState(null);
+  // Connected user ids to the session
+  const [connectedUsers, setConnectedUsers] = useState([]);
+
+  // My session object reference
+  const mySessionRef = useRef(null);
+
+  // Stream and pose landmarker states
+  const [myStream, setMyStream] = useState(null);
+
+  // Error state
   const [error, setError] = useState(null);
 
-  // Connect to session on mount
-  useEffect(() => {
-    let conn = null;
+  /**
+   * Handles the event when another user joins the session
+   * @param {string} userId - The id of the user who joined
+   */
+  const otherUserJoined = (userId) => {
+    // Check if the user is the local user
+    if (userId === id) return;
 
-    const run = async () => {
-      try {
-        const res = await joinSession(sessionId, id);
-        if (!res.success) {
-          setError(res.error || 'Could not connect to session');
-          return;
-        }
-        conn = res.data;
-        setConnection(conn);
+    // Check if the user is already in the remote streams
+    if (!remoteStreams.some((stream) => stream.id === userId)) {
+      // Add the user to the remote streams
+      setRemoteStreams((prev) => [...prev, { id: userId, stream: null }]);
 
-        const raw = conn.userIds ?? [];
-        const userIds = [...new Set(raw.map((u) => String(u)))];
-        setConnectedUsers(userIds);
-        const seen = new Set();
-        setRemoteStreams(
-          userIds
-            .filter((uid) => {
-              if (String(uid) === String(id)) return false;
-              if (seen.has(String(uid))) return false;
-              seen.add(String(uid));
-              return true;
-            })
-            .map((uid) => ({ id: uid, stream: null }))
-        );
+      // Add the user to the connected users
+      setConnectedUsers((prev) => [...prev, userId]);
+    }
+  }
 
-        conn.onUserJoined((remoteId) => {
-          const key = String(remoteId);
-          if (key === String(id)) return;
-          setRemoteStreams((prev) =>
-            prev.some((r) => String(r.id) === key)
-              ? prev
-              : [...prev, { id: remoteId, stream: null }]
-          );
-          setConnectedUsers((prev) =>
-            prev.some((u) => String(u) === key) ? prev : [...prev, remoteId]
-          );
-        });
-        conn.onUserLeft?.((leftId) => {
-          peerConnectionsRef.current.get(String(leftId))?.close();
-          peerConnectionsRef.current.delete(String(leftId));
-          setRemoteStreams((prev) => prev.filter((r) => String(r.id) !== String(leftId)));
-          setConnectedUsers((prev) => prev.filter((uid) => String(uid) !== String(leftId)));
-        });
-        conn.onStreamAdded?.((remoteId, stream) => {
-          setRemoteStreams((prev) =>
-            prev.map((r) => (String(r.id) === String(remoteId) ? { ...r, stream } : r))
-          );
-        });
-      } catch (err) {
-        setError(err?.error ?? err?.message ?? 'Connection failed');
+  /**
+   * Handles the event when another user leaves the session
+   * @param {string} userId - The id of the user who left
+   */
+  const otherUserLeft = (userId) => {
+    // Close and delete the peer connection
+    peerConnectionsRef.current.get(userId)?.close();
+    peerConnectionsRef.current.delete(userId);
+
+    // Remove the user from the remote streams
+    let updatedRemoteStreams = remoteStreams.filter((remote) => remote.id !== userId);
+    setRemoteStreams(updatedRemoteStreams);
+
+    // Remove the user from the connected users
+    let updatedConnectedUsers = connectedUsers.filter((uid) => uid !== userId);
+    setConnectedUsers(updatedConnectedUsers);
+  }
+
+  /**
+   * Handles the event when another user adds a stream
+   * @param {string} remoteId - The id of the user who added the stream
+   * @param {MediaStream} stream - The stream that was added
+   */
+  const otherStreamAdded = (remoteId, stream) => {
+    setRemoteStreams((prev) => {
+      const updatedRemoteStreams = [...prev];
+
+      // Find index of remote stream
+      const idx = updatedRemoteStreams.findIndex((r) => r.id === remoteId);
+
+      // If remote stream exists, update it
+      if (idx >= 0) {
+        updatedRemoteStreams[idx].stream = stream;
       }
-    };
-
-    run();
-
-    return () => {
-      peerConnectionsRef.current.forEach((pc) => pc.close());
-      peerConnectionsRef.current.clear();
-      conn?.close?.();
-    };
-  }, [sessionId, id]);
-
-  useEffect(() => {
-    if (!connection || !stream) return;
-    const myId = parseInt(id, 10) || 0;
-    const ensurePeer = (remoteId) => {
-      const key = String(remoteId);
-      if (peerConnectionsRef.current.has(key)) return;
-      const pc = createPeerConnection(
-        remoteId,
-        stream,
-        (rid, s) => connection.addRemoteStream(rid, s),
-        (rid, candidate) =>
-          connection.sendSignal({
-            type: 'ice',
-            to: rid,
-            candidate: candidate?.toJSON ? candidate.toJSON() : candidate,
-          })
-      );
-      peerConnectionsRef.current.set(key, pc);
-      const otherId = parseInt(remoteId, 10) || 0;
-      if (myId > otherId) {
-        createOffer(pc)
-          .then((offer) =>
-            connection.sendSignal({
-              type: 'offer',
-              to: remoteId,
-              offer,
-            })
-          )
-          .catch((err) => console.error('Create offer failed:', err));
+      // If remote stream does not exist, add it
+      else {
+        updatedRemoteStreams.push({ id: remoteId, stream });
       }
-    };
-    const handleSignal = async (data) => {
-      const target = String(data.from);
-      let pc = peerConnectionsRef.current.get(target);
-      if (!pc && stream) {
-        ensurePeer(data.from);
-        pc = peerConnectionsRef.current.get(target);
-      }
-      if (!pc) return;
-      try {
-        if (data.type === 'offer') {
-          await createAnswer(pc, data.offer);
-          connection.sendSignal({
-            type: 'answer',
-            to: data.from,
-            answer: pc.localDescription,
-          });
-        } else if (data.type === 'answer') {
-          await handleAnswer(pc, data.answer);
-        } else if (data.type === 'ice' && data.candidate) {
-          await addIceCandidate(pc, data.candidate);
-        }
-      } catch (err) {
-        console.error('Signal handling failed:', err);
-      }
-    };
-    const unsubSignal = connection.onSignal(handleSignal);
-    const unsubJoined = connection.onUserJoined((remoteId) => ensurePeer(remoteId));
-    (connection.userIds ?? []).forEach((uid) => {
-      if (String(uid) !== String(id)) ensurePeer(uid);
+
+      // Return updated remote streams
+      return updatedRemoteStreams;
     });
-    return () => {
-      unsubSignal?.();
-      unsubJoined?.();
-    };
-  }, [connection, stream, id]);
+  }
 
-  useEffect(() => {
-    if (!sessionId) {
-      setError('Missing session parameters');
-      return;
+  /**
+ * Creates a peer connection for a remote user
+ * @param {string} remoteId - The id of the remote user
+ */
+  const ensurePeerConnection = async (remoteId) => {
+    // Check if the peer connection already exists
+    if (peerConnectionsRef.current.has(remoteId)) return;
+
+    // Define connection callbacks
+    const onRemoteStream = (rid, stream) => myConnection.addRemoteStream(rid, stream);
+    const candidate = candidate?.toJSON ? candidate.toJSON() : candidate;
+    const onIceCandidate = (rid, candidate) => myConnection.sendSignal({ type: 'ice', to: rid, candidate, });
+
+    // Create a new peer connection
+    const pc = createPeerConnection(remoteId, myStream, onRemoteStream, onIceCandidate);
+    peerConnectionsRef.current.set(remoteId, pc);
+
+    // Create an offer for the remote user
+    const offer = await createOffer(pc);
+    myConnection.sendSignal({ type: 'offer', to: remoteId, offer, });
+  };
+
+  /**
+ * Handles the signal from another user
+ * @param {object} data - The signal data
+ */
+  const handleSignal = async (data) => {
+    // Get the peer connection for the remote user
+    let pc = peerConnectionsRef.current.get(data.from);
+
+    // If the peer connection does not exist, create a new one
+    if (!pc && myStream) {
+      await ensurePeerConnection(data.from);
+      pc = peerConnectionsRef.current.get(data.from);
     }
 
-    const session = new Session(id, sessionId);
-    sessionRef.current = session;
+    try {
+      switch (data.type) {
+        // If offer, create an answer
+        case 'offer':
+          await createAnswer(pc, data.offer);
+          myConnection.sendSignal({ type: 'answer', to: data.from, answer: pc.localDescription, });
+          break;
+        // If answer, handle it
+        case 'answer':
+          await handleAnswer(pc, data.answer);
+          break;
+        // If ICE candidate, add it to the peer connection
+        case 'ice':
+          if (data.candidate) {
+            // Create a new ICE candidate object
+            let candObj = data.candidate;
+            if (data.candidate.candidate === undefined)
+              candObj = new RTCIceCandidate(data.candidate);
 
-    session
-      .start()
-      .then(({ stream: s, poseLandmarker: pm }) => {
-        setStream(s);
-        setPoseLandmarker(pm);
-      })
-      .catch((e) => setError(e.message));
+            await addIceCandidate(pc, candObj);
+          }
+          break;
+        default:
+          console.error('Invalid signal type:', data.type);
+          break;
+      }
+    } catch (err) {
+      console.error('Signal handling failed:', err);
+    }
+  };
 
-    return () => {
-      sessionRef.current?.stop();
-    };
-  }, [id, sessionId]);
+  /**
+   * Handles the event when the session is ended
+   */
+  const handleEndSession = async () => {
+    // Stop the session
+    await stopSession(sessionId, id);
 
-  const handleEndSession = () => {
-    sessionRef.current?.stop();
+    // Stop the session
+    mySessionRef.current?.stop();
+
+    // Close the window and redirect to the home page
     window.close();
     if (!window.closed) window.location.href = '/';
   };
 
-  // Early-render UI
-  if (error) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-900 text-white">
-        <p>{error}</p>
-        <button onClick={() => navigate('/')} className="mt-4 text-blue-400 underline">
-          Back to home
-        </button>
-      </div>
-    );
-  }
-  if (!connection) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-900 text-white">
-        <p>Connecting to session...</p>
-      </div>
-    );
-  }
-  if (!stream) {
-    return (
-      <div className="min-h-screen flex items-center justify-center bg-slate-900 text-white">
-        <p>Starting camera...</p>
-      </div>
-    );
-  }
+  // Connect to session on mount
+  useEffect(() => {
+    // Check if sessionId and id are missing
+    if (!sessionId || !id) {
+      let missing = 'parameters: ';
+      !sessionId && (missing += 'sessionId, ');
+      !id && (missing += 'id');
 
-  const uniqueUsers = [...new Set(connectedUsers.map((u) => String(u)))];
-  const remoteList = remoteStreams.filter((r, i, arr) => arr.findIndex((x) => String(x.id) === String(r.id)) === i);
+      setError(`Missing ${missing}.`);
+      return;
+    }
 
-  const userIdsTitle = uniqueUsers
-    .map((uid) => (String(uid) === String(id) ? `You (${uid})` : uid))
-    .join(', ');
+    /**
+     * Fetches the connection to the session from the server
+     */
+    const fetchConnection = async () => {
+      let conn = null;
+
+      try {
+        // Join session and get connection data from server
+        const response = await joinSession(sessionId, id);
+
+        // Check if connection was successful
+        if (!response.success) {
+          setError(response.error || 'Could not connect to session');
+          return;
+        }
+
+        conn = response.data;
+
+        // Set connection
+        setMyConnection(conn);
+
+        // Set connected users
+        const userIds = conn.userIds || [];
+        setConnectedUsers(userIds);
+
+        // Set other participants' streams
+        const otherUserIds = userIds.filter((user_id) => user_id != id);
+        const updatedRemoteStreams = otherUserIds.map((uid) => ({ id: uid, stream: null }));
+        setRemoteStreams(updatedRemoteStreams);
+
+        // On user joined event, add the user to the remote streams and connected users
+        conn.onUserJoined((userId) => otherUserJoined(userId));
+
+        // On user left event, remove the user from the remote streams and connected users
+        conn.onUserLeft((userId) => otherUserLeft(userId));
+
+        // On stream added event, add or update the stream in the remote streams
+        conn.onStreamAdded((remoteId, stream) => otherStreamAdded(remoteId, stream));
+      } catch (err) {
+        setError('Connection failed');
+      }
+    };
+
+    /**
+     * Starts a new session
+     */
+    const makeNewSession = async () => {
+      // Get the training session schedule
+      const response = await getTrainingSessionSchedule(sessionId);
+
+      // Check if the training session schedule was successful
+      if (!response.success) {
+        setError(response.error || 'Could not get training session schedule');
+        return;
+      }
+      const schedule = response.data;
+
+      // Create a new session object
+      const session = new Session(id, sessionId, schedule);
+      mySessionRef.current = session;
+
+      // Start the session
+      await session.start();
+
+      // Set the stream and pose landmarker
+      setMyStream(session.stream);
+    }
+
+    fetchConnection();
+    makeNewSession();
+
+    // Cleanup function when leaving the page
+    return () => {
+      // Stop the session
+      mySessionRef.current?.stop();
+
+      // Close all peer connections
+      peerConnectionsRef.current.forEach((pc) => pc.close());
+      peerConnectionsRef.current.clear();
+
+      // Close the connection to the session
+      myConnection?.close();
+    };
+  }, []);
+
+  useEffect(() => {
+    // Check if my connection and stream are available
+    if (!myConnection || !myStream) return;
+
+    // On signal event, handle the signal
+    const unsubSignal = myConnection.onSignal(handleSignal);
+
+    // On user joined event, ensure a peer connection
+    const unsubJoined = myConnection.onUserJoined((remoteId) => ensurePeerConnection(remoteId));
+
+    // Ensure peer connections for all connected users
+    (myConnection.userIds).forEach((userId) => {
+      if (userId !== id)
+        ensurePeerConnection(userId);
+    });
+
+    // Cleanup function when leaving the page
+    return () => {
+      // Unsubscribe from the signal event
+      unsubSignal?.();
+
+      // Unsubscribe from the user joined event
+      unsubJoined?.();
+    };
+  }, [myConnection]);
 
   return (
-    <div className="min-h-screen bg-slate-900 flex flex-col items-center justify-center p-6">
-      <p className="text-white/90 text-lg font-semibold mb-2">
-        Users in session: {userIdsTitle}
-      </p>
-      <div className="flex flex-wrap justify-center gap-6">
-        <div className="flex flex-col items-center">
-          <span className="text-white/80 text-sm mb-2">You (video)</span>
-          <Video stream={stream} poseLandmarker={null} isSkeletonShow={false} />
-        </div>
-        <div className="flex flex-col items-center">
-          <span className="text-white/80 text-sm mb-2">You (skeleton)</span>
-          <Video stream={stream} poseLandmarker={poseLandmarker} isSkeletonShow />
-        </div>
-        {remoteList.map(({ id: remoteId, stream: remoteStream }) => (
-          <div key={remoteId} className="flex flex-col items-center">
-            <span className="text-white/80 text-sm mb-2">User {remoteId}</span>
-            {remoteStream ? (
-              <Video stream={remoteStream} poseLandmarker={null} isSkeletonShow={false} />
-            ) : (
-              <div className="w-80 aspect-video bg-slate-800 rounded-lg flex items-center justify-center text-slate-400">
-                Connecting...
-              </div>
-            )}
+    <div className="min-h-screen w-full flex flex-col items-center justify-center p-6">
+      {/* Error handling message */}
+      {error ? (
+        <div className="min-h-screen flex items-center justify-center">
+          <p>{error}</p>
+          <button onClick={() => navigate('/')} className="mt-4 text-blue-400 underline">
+            Back to home
+          </button>
+        </div>) :
+        !myConnection ? (
+          <div className="min-h-screen flex items-center justify-center">
+            <p>Connecting to session...</p>
           </div>
-        ))}
-      </div>
-      <button
-        onClick={handleEndSession}
-        className="mt-6 bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-8 rounded-xl"
-      >
-        End Session
-      </button>
+        ) :
+          !myStream && (
+            <div className="min-h-screen flex items-center justify-center">
+              <p>Starting camera...</p>
+            </div>
+          )
+      }
+
+      {/* Session UI */}
+      {!error && myConnection && myStream && (
+        <>
+          {/* Users in session title */}
+          <p className="text-lg font-semibold mb-2">
+            Users in session: {connectedUsers.map((uid) => (uid === id ? `You (${uid})` : uid)).join(', ')}
+          </p>
+
+          {/* Videos */}
+          <div className="flex flex-wrap justify-center gap-6">
+            {/* My video */}
+            <div className="flex flex-col items-center">
+              <span className="text-sm mb-2">You</span>
+              <Video
+                stream={myStream}
+                isSkeletonShow={true}
+                session={mySessionRef.current}
+              />
+            </div>
+
+            {/* Remote videos */}
+            {remoteStreams.map(({ id: remoteId, stream: remoteStream }) => (
+              <div key={remoteId} className="flex flex-col items-center">
+                <span className="text-sm mb-2">User {remoteId}</span>
+                {/* Remote video */}
+                {remoteStream ? (
+                  <Video stream={remoteStream} isSkeletonShow={false} />
+                ) : (
+                  <div className="w-80 aspect-video bg-slate-800 rounded-lg flex items-center justify-center text-slate-400">
+                    Connecting...
+                  </div>
+                )}
+              </div>
+            ))}
+          </div>
+
+          {/* End session button */}
+          <button
+            onClick={handleEndSession}
+            className="mt-6 bg-red-600 hover:bg-red-700 text-white font-bold py-3 px-8 rounded-xl"
+          >
+            End Session
+          </button>
+        </>
+      )}
     </div>
   );
 }

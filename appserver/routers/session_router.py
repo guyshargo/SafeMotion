@@ -10,6 +10,7 @@ router = APIRouter(prefix="/session", tags=["session"])
 # Server-side session management
 # TODO: Add a database to store the sessions
 DEFAULT_SESSION_ID = "default"
+DEFAULT_SESSION_SCHEDULE = []
 sessions = {} 
 session_connections = {}  
 
@@ -144,39 +145,65 @@ async def session_join_websocket(websocket: WebSocket, session_id: str, id: str)
         end_action("Session", "Leave session websocket", { session_id, id })
 
 
-@router.get("/count/{session_id:str}")
-def get_session_count(session_id: str):
-    """Return the number of people in the session."""
-    if session_id not in sessions:
-        return {"success": False, "error": "Session not found"}
-    return {"success": True, "count": len(sessions[session_id])}
-
-
+"""
+    Stop a session.
+    Args:
+        session_id: str - The session id
+        id: str - The id of the user
+    Returns:
+        dict - The response
+"""
 @router.get("/stop/{session_id:str}/{id:str}")
 async def stop_session(session_id: str, id: str):
-    """Remove the given id from the session and close their websocket."""
     start_action("Session", "Stop session", f"{session_id} id={id}")
 
+    # Check if session exists
     if session_id not in sessions:
         error_message("Session", "Session not found", session_id)
         return {'success': False, 'error': 'Session not found'}
 
+    # Get the ids in the session
     ids = sessions[session_id]
+
+    # Check if the id is in the session
     if id in ids:
         ids.remove(id)
+
+        # Check if the session is empty
         if not ids:
             del sessions[session_id]
         else:
             await _broadcast_message(id, session_id, {"type": "user_left", "id": id})
-        # Close websocket if connected (triggers client disconnect)
+
+        # Close websocket if connected
         if session_id in session_connections and id in session_connections[session_id]:
             ws = session_connections[session_id].pop(id, None)
+
+            # Check if the session connection is empty
             if not session_connections[session_id]:
                 del session_connections[session_id]
             if ws is not None:
                 await ws.close()
+                
         end_action("Session", "Stop session", session_id)
         return {'success': True, 'message': 'User left session'}
     else:
         error_message("Session", "ID not in session", id)
         return {'success': False, 'error': 'ID not in session'}
+
+"""
+    Get session schedule.
+    Args:
+        session_id: str - The session id
+    Returns:
+        dict - The response
+"""
+@router.get("/{session_id:str}")
+async def get_session_schedule(session_id: str):
+    start_action("Session", "Get session schedule", session_id)
+
+    # TODO: Get the session schedule from the database
+
+    end_action("Session", "Get session schedule", session_id)
+    return {'success': True, 'data': DEFAULT_SESSION_SCHEDULE}
+
