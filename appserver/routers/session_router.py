@@ -2,6 +2,7 @@
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from PrintMessages import start_action, end_action, info_message, error_message
+from Trainer import StubTrainer
 import json
 
 # Define the router for the session endpoints
@@ -9,8 +10,7 @@ router = APIRouter(prefix="/session", tags=["session"])
 
 # Server-side session management
 # TODO: Add a database to store the sessions
-DEFAULT_SESSION_ID = "default"
-DEFAULT_SESSION_SCHEDULE = []
+DEFAULT_TRAINER = StubTrainer()
 sessions = {} 
 session_connections = {}  
 
@@ -199,11 +199,12 @@ async def stop_session(session_id: str, id: str):
         dict - The response
 """
 @router.get("/{session_id:str}")
-async def get_session_schedule(session_id: str):
+async def get_trainer(session_id: str):
     start_action("Session", "Get session schedule", session_id)
 
     # TODO: Get the session schedule from the database
+    trainer = DEFAULT_TRAINER.toJson()
 
     end_action("Session", "Get session schedule", session_id)
-    return {'success': True, 'data': DEFAULT_SESSION_SCHEDULE}
+    return {'success': True, 'data': trainer}
 

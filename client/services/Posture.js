@@ -146,4 +146,8 @@ export class Posture {
         const diff = this.#difference(this.wrist?.right?.y, this.shoulder?.right?.y);
         return diff != null && diff < 0;
     }
+
+    isBothHandsDown() {
+        return !this.isLeftHandUp() && !this.isRightHandUp();
+    }
 }
