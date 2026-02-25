@@ -1,18 +1,29 @@
+/**
+ * SocketConnection class - represents a socket connection
+ */
 export class SocketConnection {
+    /**
+     * Constructor
+     * @param {string} url - The URL of the websocket
+     */
     constructor(url) {
-        // URL of the websocket
-        this.url = url;
-
-        // Websocket connection
-        this.ws = null;
-
-        this.remoteStreams = [];
-        this.userJoinedCallbacks = new Set();
-        this.streamAddedCallbacks = new Set();
-        this.userLeftCallbacks = new Set();
-        this.signalCallbacks = new Set();
+        this.url = url;                        // The URL of the websocket
+        this.ws = null;                        // The websocket connection
+        this.remoteStreams = [];               // The remote streams
+        this.userJoinedCallbacks = new Set();  // The user joined callbacks
+        this.streamAddedCallbacks = new Set(); // The stream added callbacks
+        this.userLeftCallbacks = new Set();    // The user left callbacks
+        this.signalCallbacks = new Set();      // The signal callbacks
     }
 
+    /**
+     * Handles the message from the websocket
+     * @param {object} message - The message from the websocket
+     * @param {string} sessionId - The session id
+     * @param {string} id - The id of the user
+     * @param {function} resolve - The resolve function
+     * @param {function} reject - The reject function
+     */
     #handleMessage(message, sessionId, id, resolve, reject) {
         switch (message.type) {
             // Another user joined session
@@ -109,6 +120,13 @@ export class SocketConnection {
                 break;
         }
     }
+
+    /**
+     * Connects to the websocket
+     * @param {string} sessionId - The session id
+     * @param {string} id - The id of the user
+     * @returns {Promise<{success: boolean, error: string, id: string, sessionId: string, participantCount: number, participants: string[], onUserJoined: (cb: (id: string, count: number) => void) => void, onUserLeft: (cb: (id: string, count: number) => void) => void, onSignal: (cb: (data: any) => void) => void, sendSignal: (msg: any) => void, onStreamAdded: (cb: (id: string, stream: MediaStream) => void) => void, addRemoteStream: (remoteId: string, stream: MediaStream) => void, getRemoteStreams: () => {id: string, stream: MediaStream}[], close: () => void}>}
+     */
     connect(sessionId, id) {
         return new Promise((resolve, reject) => {
             // Join session websocket

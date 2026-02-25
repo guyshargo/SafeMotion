@@ -57,6 +57,53 @@ export class Session {
   }
 
   /**
+ * Stops the session
+ */
+  stop() {
+    // Stop the all tracks in the stream and null the stream
+    if (this.stream) {
+      this.stream.getTracks().forEach((track) => track.stop());
+      this.stream = null;
+    }
+
+    // Stop the pose landmarker and null the pose landmarker
+    if (this.poseLandmarker) {
+      this.poseLandmarker.close();
+      this.poseLandmarker = null;
+    }
+
+    // Set the session to not started
+    this.isStarted = false;
+    this.isFinished = true;
+  }
+
+  /**
+   * Detects the pose from a video element
+   * @param {HTMLVideoElement} videoElement - The video element
+   * @param {number} timestampMs - The timestamp in milliseconds
+   * @returns {PoseLandmarkerResult | null} The pose landmarker result
+   */
+  detectPose(videoElement, timestampMs) {
+    // Check if the pose landmarker is available and the video element is ready
+    if (!this.poseLandmarker || videoElement.readyState < 2) return null;
+
+    const skeleton = this.poseLandmarker.detectForVideo(videoElement, timestampMs);
+    if (!skeleton?.landmarks?.length) return { skeleton, result: '---' };
+
+    // mirror: false — MediaPipe already uses subject left/right (person's left = 11, right = 12)
+    const posture = new Posture(skeleton.landmarks[0], false);
+    const poseCheck = this.#checkPosture(posture);
+
+    this.isFinished = this.trainer.session.length === 0;
+
+    return { skeleton, poseCheck };
+  }
+
+  /************************************************************************************************************ */
+  /************************************************************************************************************ */
+  /************************************************************************************************************ */
+
+  /**
    * Finishes the training
    * @param {number} repeats - The number of repeats
    * @param {number} sets - The number of sets
@@ -101,15 +148,46 @@ export class Session {
     this.awaitingRelax = Boolean(this.current.relaxId);
   }
 
+
+  /**
+   * Converts the pose id to text
+   * @param {string} poseId - The pose id
+   * @param {string} fallback - The fallback text
+   * @returns {string} The text
+   */
   #poseIdToText(poseId, fallback = '---') {
     const poseMap = {
       leftHandUp: 'Left hand up',
       rightHandUp: 'Right hand up',
       bothHandUp: 'Both hands up',
       bothHandsDown: 'Both hands down',
+      upperBody: 'Upper body',
+      lowerBody: 'Lower body',
+      head: 'Head',
     };
 
     return poseMap[poseId] || fallback;
+  }
+
+  /**
+   * Checks if the visibility is met
+   * @returns {boolean} True if the visibility is met, false otherwise
+   */
+  #checkVisibility(posture) {
+    for (const item of this.trainer.visibilityReqs) {
+      switch (item) {
+        case 'upperBody':
+          if (!posture.isUpperBody()) return false;
+          break;
+        case 'lowerBody':
+          if (!posture.isLowerBody()) return false;
+          break;
+        case 'head':
+          if (!posture.isHead()) return false;
+          break;
+      }
+    }
+    return true;
   }
 
   /**
@@ -120,11 +198,23 @@ export class Session {
       detectedText: '---',
       expectedText: this.current?.name || '---',
       isSucceeded: false,
+      isVisible: false,
       type: 'warning'
     };
 
     // Check if current training is available
     if (!this.current) return result;
+
+    // Check if visibility is met
+    if (!this.#checkVisibility(posture)) {
+      result.detectedText = this.trainer.visibilityReqs.map(item => this.#poseIdToText(item)).join(', ');
+      result.isVisible = false;
+      result.type = 'error';
+      return result;
+    }
+    else {
+      result.isVisible = true;
+    }
 
     // Check if waiting for relaxation
     const expectedPoseId = this.awaitingRelax && this.current?.relaxId ?
@@ -159,48 +249,5 @@ export class Session {
     result.type = result.isSucceeded ? 'success' : detectedPoseId === 'bothHandsDown' ? 'warning' : 'error';
 
     return result;
-  }
-
-  /**
-   * Stops the session
-   */
-  stop() {
-    // Stop the all tracks in the stream and null the stream
-    if (this.stream) {
-      this.stream.getTracks().forEach((track) => track.stop());
-      this.stream = null;
-    }
-
-    // Stop the pose landmarker and null the pose landmarker
-    if (this.poseLandmarker) {
-      this.poseLandmarker.close();
-      this.poseLandmarker = null;
-    }
-
-    // Set the session to not started
-    this.isStarted = false;
-    this.isFinished = true;
-  }
-
-  /**
-   * Detects the pose from a video element
-   * @param {HTMLVideoElement} videoElement - The video element
-   * @param {number} timestampMs - The timestamp in milliseconds
-   * @returns {PoseLandmarkerResult | null} The pose landmarker result
-   */
-  detectPose(videoElement, timestampMs) {
-    // Check if the pose landmarker is available and the video element is ready
-    if (!this.poseLandmarker || videoElement.readyState < 2) return null;
-
-    const skeleton = this.poseLandmarker.detectForVideo(videoElement, timestampMs);
-    if (!skeleton?.landmarks?.length) return { skeleton, result: '---' };
-
-    // mirror: false — MediaPipe already uses subject left/right (person's left = 11, right = 12)
-    const posture = new Posture(skeleton.landmarks[0], false);
-    const poseCheck = this.#checkPosture(posture);
-
-    this.isFinished = this.trainer.session.length === 0;
-
-    return { skeleton, poseCheck };
   }
 }

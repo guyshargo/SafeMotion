@@ -211,7 +211,7 @@ export const Video = ({
               {/* Left info block */}
               <div className='flex flex-col h-fit gap-2 bg-white p-4 rounded-lg'>
                 <h1 className="text-2xl font-bold">Need to perform: {session.isFinished ? 'Finished' : result.expectedText}</h1>
-                <h1 className="text-2xl font-bold">Detected: {session.isFinished ? 'Finished' : result.detectedText}</h1>
+                <h1 className="text-2xl font-bold">{result.isVisible || session.isFinished ? 'Detected': 'Must show'}: {result.detectedText}</h1>
                 <h1 className="text-2xl font-bold">Hold: {countdown || '---'}</h1>
               </div>
 
