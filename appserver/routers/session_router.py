@@ -15,12 +15,10 @@ sessions = {}
 session_connections = {}  
 
 """
-    Send a message to a socket.
-    Args:
-        socket: WebSocket - The socket to send the message to
-        message: dict - The message to send
-    Returns:
-        None
+Send a message to a socket.
+@param {WebSocket} socket - The socket to send the message to
+@param {dict} message - The message to send
+@returns {None}
 """
 async def _send_message(socket: WebSocket, message: dict):
     try:
@@ -29,12 +27,11 @@ async def _send_message(socket: WebSocket, message: dict):
         pass
 
 """
-    Args:
-        session_id: str - The session id
-        message: dict - The message to broadcast
-    new_id: str - The id of the new user
-    Returns:
-        None
+Broadcast a message to all sockets in a session.
+@param {string} sender_id - The id of the sender
+@param {string} session_id - The session id
+@param {dict} message - The message to broadcast
+@returns {None}
 """
 async def _broadcast_message(sender_id: str, session_id: str, message: dict):
     # Check if session exists
@@ -51,13 +48,11 @@ async def _broadcast_message(sender_id: str, session_id: str, message: dict):
         await _send_message(socket, message)
 
 """
-    Listen for messages from the client.
-    Args:
-        websocket: WebSocket - The websocket connection
-        session_id: str - The session id
-        id: str - The id of the user
-    Returns:
-        None
+Listen for messages from the client.
+@param {WebSocket} websocket - The websocket connection
+@param {string} session_id - The session id
+@param {string} id - The id of the user
+@returns {None}
 """
 async def listen(websocket: WebSocket, session_id: str, id: str):
     # Listen for messages from the client
@@ -80,13 +75,11 @@ async def listen(websocket: WebSocket, session_id: str, id: str):
         except (json.JSONDecodeError, KeyError):
             pass
 """
-    Join session. If first to enter, creates the session.
-    Args:
-        websocket: WebSocket - The websocket connection
-        session_id: str - The session id
-        id: str - The id of the user
-    Returns:
-        dict - The response
+Join session. If first to enter, creates the session.
+@param {WebSocket} websocket - The websocket connection
+@param {string} session_id - The session id
+@param {string} id - The id of the user
+@returns {dict} - The response
 """
 @router.websocket("/ws/{session_id:str}/{id:str}")
 async def session_join_websocket(websocket: WebSocket, session_id: str, id: str):
@@ -146,12 +139,10 @@ async def session_join_websocket(websocket: WebSocket, session_id: str, id: str)
 
 
 """
-    Stop a session.
-    Args:
-        session_id: str - The session id
-        id: str - The id of the user
-    Returns:
-        dict - The response
+Stop a session.
+@param {string} session_id - The session id
+@param {string} id - The id of the user
+@returns {dict} - The response
 """
 @router.get("/stop/{session_id:str}/{id:str}")
 async def stop_session(session_id: str, id: str):
@@ -192,11 +183,9 @@ async def stop_session(session_id: str, id: str):
         return {'success': False, 'error': 'ID not in session'}
 
 """
-    Get session schedule.
-    Args:
-        session_id: str - The session id
-    Returns:
-        dict - The response
+Get training session.
+@param {string} session_id - The session id
+@returns {dict} - The response
 """
 @router.get("/{session_id:str}")
 async def get_trainer(session_id: str):

@@ -7,6 +7,7 @@ const pendingCandidates = new WeakMap();
 /**
  * Drains the pending candidates for a peer connection
  * @param {RTCPeerConnection} pc - The peer connection
+ * @returns {Promise<void>}
  */
 export const drainPendingCandidates = async (pc) => {
     // Get the queue of pending candidates for the peer connection

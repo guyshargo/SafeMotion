@@ -51,11 +51,23 @@ export class Posture {
         this.foot = { left: l31, right: r31 };
     }
 
+    /**
+     * Calculates the difference between two values
+     * @param {number} a - The first value
+     * @param {number} b - The second value
+     * @returns {number} The difference
+     */
     #difference(a, b) {
         if (!a || !b) return null;
         return a - b;
     }
 
+    /**
+     * Calculates the distance between two points
+     * @param {Object} a - The first point
+     * @param {Object} b - The second point
+     * @returns {number} The distance
+     */
     #distance(a, b) {
         if (!a || !b) return null;
 
@@ -66,6 +78,13 @@ export class Posture {
         );
     }
 
+    /**
+     * Calculates the angle between three points
+     * @param {Object} A - The first point
+     * @param {Object} B - The second point
+     * @param {Object} C - The third point
+     * @returns {number} The angle
+     */
     #angle(A, B, C) {
         if (!A || !B || !C) return null;
 
@@ -79,6 +98,10 @@ export class Posture {
         return Math.acos(dot / (magBA * magBC)) * 180 / Math.PI;
     }
 
+    /**
+     * Calculates the angle of the left knee
+     * @returns {number} The angle
+     */
     #leftKneeAngle() {
         return this.#angle(
             this.hip.left,
@@ -87,6 +110,10 @@ export class Posture {
         );
     }
 
+    /**
+     * Calculates the angle of the right knee
+     * @returns {number} The angle
+     */
     #rightKneeAngle() {
         return this.#angle(
             this.hip.right,
@@ -95,6 +122,10 @@ export class Posture {
         );
     }
 
+    /**
+     * Checks if the head is visible
+     * @returns {boolean} True if the head is visible, false otherwise
+     */
     isHead() {
         return (this.nose?.visibility ?? 0) > 0.5 && (this.leftEye?.inner?.visibility ?? 0) > 0.5 &&
             (this.rightEye?.inner?.visibility ?? 0) > 0.5 && (this.leftEye?.mid?.visibility ?? 0) > 0.5 &&
@@ -104,22 +135,39 @@ export class Posture {
             (this.mouth?.right?.visibility ?? 0) > 0.5;
     }
 
+    /**
+     * Checks if the left arm is visible
+     * @returns {boolean} True if the left arm is visible, false otherwise
+     */
     isLeftArm() {
         return (this.shoulder?.left?.visibility ?? 0) > 0.5 && (this.elbow?.left?.visibility ?? 0) > 0.5 &&
             (this.wrist?.left?.visibility ?? 0) > 0.5 && (this.finger?.pinky?.left?.visibility ?? 0) > 0.5 &&
             (this.finger?.index?.left?.visibility ?? 0) > 0.5 && (this.finger?.thumb?.left?.visibility ?? 0) > 0.5;
     }
 
+    /**
+     * Checks if the right arm is visible
+     * @returns {boolean} True if the right arm is visible, false otherwise
+     */
     isRightArm() {
         return (this.shoulder?.right?.visibility ?? 0) > 0.5 && (this.elbow?.right?.visibility ?? 0) > 0.5 &&
             (this.wrist?.right?.visibility ?? 0) > 0.5 && (this.finger?.pinky?.right?.visibility ?? 0) > 0.5 &&
             (this.finger?.index?.right?.visibility ?? 0) > 0.5 && (this.finger?.thumb?.right?.visibility ?? 0) > 0.5;
     }
+
+    /**
+     * Checks if the upper body is visible
+     * @returns {boolean} True if the upper body is visible, false otherwise
+     */
     isUpperBody() {
         return this.isLeftArm() && this.isRightArm() &&
-            (this.hip?.left?.visibility ?? 0) > 0.5 && (this.hip?.right?.visibility ?? 0) > 0.5;
+            (this.shoulder?.left?.visibility ?? 0) > 0.5 && (this.shoulder?.right?.visibility ?? 0) > 0.5;
     }
 
+    /**
+     * Checks if the lower body is visible
+     * @returns {boolean} True if the lower body is visible, false otherwise
+     */
     isLowerBody() {
         return (this.knee?.left?.visibility ?? 0) > 0.5 && (this.knee?.right?.visibility ?? 0) > 0.5 &&
             (this.ankle?.left?.visibility ?? 0) > 0.5 && (this.ankle?.right?.visibility ?? 0) > 0.5 &&
@@ -127,6 +175,15 @@ export class Posture {
             (this.foot?.left?.visibility ?? 0) > 0.5 && (this.foot?.right?.visibility ?? 0) > 0.5;
     }
 
+    /************************************************************************************************************ */
+    /************************************************************************************************************ */
+    /************************************************************************************************************ */
+
+    /**
+     * Checks if the squatting is visible
+     * @param {number} angleThreshold - The angle threshold
+     * @returns {boolean} True if the squatting is visible, false otherwise
+     */
     isSquatting(angleThreshold = 100) {
         const left = this.#angle(this.hip.left, this.knee.left, this.ankle.left);
         const right = this.#angle(this.hip.right, this.knee.right, this.ankle.right);
@@ -134,6 +191,10 @@ export class Posture {
         return left < angleThreshold && right < angleThreshold;
     }
 
+    /**
+     * Checks if the left hand is up
+     * @returns {boolean} True if the left hand is up, false otherwise
+     */
     isLeftHandUp() {
         if (!this.isLeftArm()) return false;
         // y increases downward; hand up = wrist above shoulder = wrist.y < shoulder.y
@@ -141,12 +202,20 @@ export class Posture {
         return diff != null && diff < 0;
     }
 
+    /**
+     * Checks if the right hand is up
+     * @returns {boolean} True if the right hand is up, false otherwise
+     */
     isRightHandUp() {
         if (!this.isRightArm()) return false;
         const diff = this.#difference(this.wrist?.right?.y, this.shoulder?.right?.y);
         return diff != null && diff < 0;
     }
 
+    /**
+     * Checks if both hands are down
+     * @returns {boolean} True if both hands are down, false otherwise
+     */
     isBothHandsDown() {
         return !this.isLeftHandUp() && !this.isRightHandUp();
     }
