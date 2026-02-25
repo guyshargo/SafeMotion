@@ -110,9 +110,11 @@ export function VideoPage() {
 
     // Define connection callbacks
     const onRemoteStream = (rid, stream) => myConnection.addRemoteStream(rid, stream);
-    const candidate = candidate?.toJSON ? candidate.toJSON() : candidate;
-    const onIceCandidate = (rid, candidate) => myConnection.sendSignal({ type: 'ice', to: rid, candidate, });
-
+    const onIceCandidate = (rid, candidate) => {
+      const normalizedCandidate = candidate?.toJSON ? candidate.toJSON() : candidate;
+      myConnection.sendSignal({ type: 'ice', to: rid, candidate: normalizedCandidate });
+    };
+    
     // Create a new peer connection
     const pc = createPeerConnection(remoteId, myStream, onRemoteStream, onIceCandidate);
     peerConnectionsRef.current.set(remoteId, pc);
@@ -249,10 +251,10 @@ export function VideoPage() {
         setError(response.error || 'Could not get training session schedule');
         return;
       }
-      const schedule = response.data;
+      const trainer = response.data;
 
       // Create a new session object
-      const session = new Session(id, sessionId, schedule);
+      const session = new Session(id, sessionId, trainer);
       mySessionRef.current = session;
 
       // Start the session
@@ -342,7 +344,7 @@ export function VideoPage() {
               <span className="text-sm mb-2">You</span>
               <Video
                 stream={myStream}
-                isSkeletonShow={true}
+                devMode={true}
                 session={mySessionRef.current}
               />
             </div>
@@ -353,7 +355,7 @@ export function VideoPage() {
                 <span className="text-sm mb-2">User {remoteId}</span>
                 {/* Remote video */}
                 {remoteStream ? (
-                  <Video stream={remoteStream} isSkeletonShow={false} />
+                  <Video stream={remoteStream} />
                 ) : (
                   <div className="w-80 aspect-video bg-slate-800 rounded-lg flex items-center justify-center text-slate-400">
                     Connecting...

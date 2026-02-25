@@ -42,11 +42,12 @@ export const stopSession = async (sessionId, id) => {
     try {
         // Send request to stop the session
         const response = await fetch(`${SERVER_URL}/session/stop/${sessionId}/${id}`);
+        const data = await response.json();
 
         // Check if the request was successful
-        return response.success ?
-            { success: true, data: response.message } :
-            { success: false, error: response.error };
+        return data.success ?
+            { success: true, data: data.message } :
+            { success: false, error: data.error };
 
     } catch (error) {
         console.error('Error stopping session:', error);
@@ -68,6 +69,7 @@ export const getTrainingSessionSchedule = async (sessionId) => {
         // Send request to get the training session schedule
         const response = await fetch(`${SERVER_URL}/session/${sessionId}`);
         const data = await response.json();
+        
         // Check if the request was successful
         return data.success ?
             { success: true, data: data.data } :
